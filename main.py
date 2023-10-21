@@ -1,3 +1,4 @@
+import argparse
 import copy
 import logging
 import time
@@ -18,13 +19,20 @@ class Pallet:
         self._rows = rows
         self._columns = columns
         self.logger = logger
-        self._empty_layer = [[self.FREE_SPACE_CHAR] * self._columns] * self._rows
+        self._empty_row = []
+        for _ in range(self._columns):
+            self._empty_row.append(self.FREE_SPACE_CHAR)
+
+        self._empty_layer = []
+        for _ in range(self._rows):
+            self._empty_layer.append(copy.copy(self._empty_row))
 
         self._current_layer_index = None
         self._free_space_per_layer = None
-        self._layers = None
+        self._layers = []
 
         self.clear_pallet()
+        self.last_pallet = False
 
     def find_position(self, package_data: tuple[int, int]):
         """
@@ -51,8 +59,8 @@ class Pallet:
                 if column == self.OCCUPIED_SPACE_CHAR:
                     continue
 
-                row_check_limit = row_idx + package_rows_size - 1
-                col_check_limit = column_idx + package_col_size - 1
+                row_check_limit = row_idx + package_rows_size
+                col_check_limit = column_idx + package_col_size
 
                 if self._check_space_for_package(
                         current_layer,
@@ -89,7 +97,8 @@ class Pallet:
     def clear_pallet(self):
         self._current_layer_index = 0
         self._free_space_per_layer = [self._columns * self._rows] * self._layers_to_do
-        self._layers = [copy.deepcopy(self._empty_layer)] * self._layers_to_do
+        for _ in range(self._layers_to_do):
+            self._layers.append(copy.deepcopy(self._empty_layer))
 
     def update_pallet_layout(
             self,
@@ -101,7 +110,7 @@ class Pallet:
     ):
         if new_pallet:
             self._handle_new_pallet(logger)
-            return
+            return True
 
         if next_layer:
             self._current_layer_index += 1
@@ -119,13 +128,15 @@ class Pallet:
             for column_idx in range(column_place_pos, column_upper_limit):
                 row[column_idx] = self.OCCUPIED_SPACE_CHAR
 
-        self.print_layer()
+        self.print_layer(show_with_previous=True)
 
         self._free_space_per_layer[self._current_layer_index] -= package_size_rows * package_size_columns
 
         if (self._current_layer_index == self._layers_to_do - 1
                 and self._free_space_per_layer[self._current_layer_index] == 0):
             self._handle_new_pallet(logger)
+            return True
+        return False
 
     def _handle_new_pallet(self, logger):
         self.logger.info(NEW_MESSAGE_SEPARATOR)
@@ -136,12 +147,15 @@ class Pallet:
         total_space_available = space_available * self._layers_to_do
         total_space_left = 0
         for layer_idx, free_space in enumerate(self._free_space_per_layer, start=1):
-            logger.info(f"Layer {layer_idx} have filled {space_available - free_space} positions "
+            logger.info(f"Layer {layer_idx} have  {space_available - free_space} positions filled"
                         f"({round(free_space / space_available * 100, 2)}% of space left free).")
             total_space_left += free_space
-        logger.info(f"\nPallet in total have filled {total_space_available - total_space_available} positions "
+        logger.info(f"\nPallet in total have {total_space_available - total_space_left} positions filled"
                     f"({round(total_space_left / total_space_available * 100, 2)}% of space left free).")
-        logger.info("\nNew pallet is introduced.")
+        if self.last_pallet:
+            logger.info("Last pallet done.")
+        else:
+            logger.info("\nNew pallet is introduced.")
         self.clear_pallet()
 
     def _check_space_for_package(self, layer, col_check_limit, column_idx, row_check_limit, row_idx):
@@ -164,21 +178,28 @@ class Pallet:
                 self.logger.info(row)
             return
 
-        self.logger.info("Current layer layout:")
-        current_layer = self._layers[self._current_layer_index]
-        rows = [" ".join(row) for row in current_layer]
-        for row in rows:
-            self.logger.info(row)
+        if show_with_previous and self._current_layer_index > 0:
+            self.logger.info(f"Previous layer ({self._current_layer_index - 1})   |   "
+                             f"Current layer ({self._current_layer_index}):")
 
-        if show_with_previous:
+            current_layer = self._layers[self._current_layer_index]
             previous_layer = self._layers[self._current_layer_index - 1]
-            self.logger.info("\nPrevious layer layout:")
-            rows = [" ".join(row) for row in previous_layer]
-            for row in rows:
-                self.logger.info(row)
+
+            rows = [" ".join(row) for row in current_layer]
+            prev_rows = [" ".join(row) for row in previous_layer]
+            for idx in range(len(rows)):
+                self.logger.info(f"{prev_rows[idx]}   |   {rows[idx]}")
+        else:
+            self.logger.info(f"Current layer ({self._current_layer_index}):")
+
+            current_layer = self._layers[self._current_layer_index]
+
+            rows = [" ".join(row) for row in current_layer]
+            for idx in range(len(rows)):
+                self.logger.info(f"{rows[idx]}")
 
 
-def main():
+def main(number_of_pallets: int):
     # logging.basicConfig(level=logging.DEBUG)
     logging.basicConfig(level=logging.INFO)
     logger: logging.Logger = logging.getLogger("Main task")
@@ -253,7 +274,10 @@ def main():
 
     logger.info("Robots are ready.")
     handle_robot_1 = True
-    while True:
+    pallets_done: int = 0
+    while (not pallet.last_pallet or pallets_done < number_of_pallets):
+        if pallets_done + 1 >= number_of_pallets:
+            pallet.last_pallet = True
         logger.info(NEW_MESSAGE_SEPARATOR)
         while (not r1_package_info_ready_to_read.is_set() and handle_robot_1) or (
                 not r2_package_info_ready_to_read.is_set() and not handle_robot_1):
@@ -266,42 +290,42 @@ def main():
 
         if handle_robot_1:
             logger.info("Handling task from robot 1")
-            handle_package_place(
-                pallet,
-                robot_1,
-                r1_package_info_ready_to_read,
-                r1_package_info_received,
-                r1_place_position_ready_to_read,
-                r1_place_position_received,
-                r1_place_done,
-                r1_place_done_confirmed,
-                place_position,
-                r1_package_data,
-                logger,
-            )
+            if handle_package_place(
+                    pallet,
+                    robot_1,
+                    r1_package_info_ready_to_read,
+                    r1_package_info_received,
+                    r1_place_position_ready_to_read,
+                    r1_place_position_received,
+                    r1_place_done,
+                    r1_place_done_confirmed,
+                    place_position,
+                    r1_package_data,
+                    logger,
+            ):
+                pallets_done += 1
             handle_robot_1 = not handle_robot_1
         else:
             logger.info("Handling task from robot 2")
-            handle_package_place(
-                pallet,
-                robot_2,
-                r2_package_info_ready_to_read,
-                r2_package_info_received,
-                r2_place_position_ready_to_read,
-                r2_place_position_received,
-                r2_place_done,
-                r2_place_done_confirmed,
-                place_position,
-                r2_package_data,
-                logger,
-            )
+            if handle_package_place(
+                    pallet,
+                    robot_2,
+                    r2_package_info_ready_to_read,
+                    r2_package_info_received,
+                    r2_place_position_ready_to_read,
+                    r2_place_position_received,
+                    r2_place_done,
+                    r2_place_done_confirmed,
+                    place_position,
+                    r2_package_data,
+                    logger,
+            ):
+                pallets_done += 1
             handle_robot_1 = not handle_robot_1
         time.sleep(1)
 
     robot_1_thread.join()
     robot_2_thread.join()
-
-    pallet.print_layer(show_empty=True)
 
 
 def handle_package_place(
@@ -318,16 +342,20 @@ def handle_package_place(
         logger: logging.Logger,
 ):
     # read package info
-    package_data = package_data.get(block=False)
+    if pallet._current_layer_index > 0:
+        pass
+    package_info = package_data.get(block=False)
     package_info_received.set()
-    logger.info(f"Package info from {robot.name} received. Package: {package_data}")
+    logger.info(f"Package info from {robot.name} received. Package: {package_info}")
     wait_for_signal(package_info_ready_to_read, False, "package_info_ready_to_read", robot.name, logger)
     package_info_received.clear()
 
     # find place position
-    new_pallet, next_layer, calculated_place_position = pallet.find_position(package_data)
+    new_pallet, next_layer, calculated_place_position = pallet.find_position(package_info)
     if new_pallet:
-        pallet.update_pallet_layout(new_pallet, next_layer, calculated_place_position, package_data, logger)
+        pallet.update_pallet_layout(new_pallet, next_layer, calculated_place_position, package_info, logger)
+        if pallet.last_pallet:
+            return True
     logger.debug(f"Place position for {robot.name} calculated.")
 
     place_position.put(calculated_place_position)
@@ -344,13 +372,15 @@ def handle_package_place(
     wait_for_signal(place_done, True, "place_done", robot.name, logger)
 
     logger.debug(f"{robot.name.capitalize()} reported finish placing.")
-    pallet.update_pallet_layout(False, next_layer, calculated_place_position, package_data, logger)
+    pallet_done: bool = pallet.update_pallet_layout(False, next_layer, calculated_place_position, package_info, logger)
     place_done_confirmed.set()
     wait_for_signal(place_done, False, "place_done", robot.name, logger)
 
     place_done_confirmed.clear()
     # robot handling done, move to next task
     logger.debug(f"Finished handling task from {robot.name}, moving to next task.")
+
+    return pallet_done
 
 
 def wait_for_signal(
@@ -374,4 +404,10 @@ def wait_for_signal(
 
 
 if __name__ == "__main__":
-    main()
+    arg_parser = argparse.ArgumentParser()
+    arg_parser.add_argument("-p", type=int, help="Provide number of pallets to do, default is 1")
+
+    args = arg_parser.parse_args()
+
+    number_of_pallets = args.p or 1
+    main(number_of_pallets)

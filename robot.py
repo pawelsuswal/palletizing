@@ -44,7 +44,8 @@ def robot_work(
 
         logger.debug("Waiting for place position from supervisor.")
         wait_for_signal(place_position_ready_to_read, True, "place_position_ready_to_read", "supervisor", logger)
-        logger.debug("Place position from supervisor received.")
+        place_position_data = place_position.get(block=False)
+        logger.debug(f"Place position from supervisor received. Position received {place_position_data}")
         place_position_received.set()
 
         wait_for_signal(place_position_ready_to_read, False, "place_position_ready_to_read", "supervisor", logger)
