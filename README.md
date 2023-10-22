@@ -1,5 +1,5 @@
 # Palletizing
-Simple application emulating process of palletization of random packages by to robots to single pallet. 
+Simple application emulating process of palletization of random packages by two robots to single pallet. 
 
 ## How to run:
 Tested only for python 3.11.
