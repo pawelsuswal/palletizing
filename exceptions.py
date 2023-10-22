@@ -1,0 +1,4 @@
+
+
+class StopThread(Exception):
+    pass
